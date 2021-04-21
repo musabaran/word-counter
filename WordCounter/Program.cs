@@ -19,14 +19,15 @@ namespace WordCounter
     class WordCounter
     {
         #region Variables
-        private char[] delimiters = { '.', '?', '!' };// Cümleleri birbirinden ayırmak için cümleyi bitiren noktalama işaretleri tanımlandı.
+        private char[] delimiters = { '.', '?', '!' };// Cümleleri birbirinden ayırmak için cümleyi sonlandırıcı noktalama işaretleri
         private int sentenceIndex = 0;
-        private int threadCount = 5;// Default thread sayısı tanımlandı
-        private int completedThread = 0;// Tüm threadlerin tamamlandıklarını kontrol etmek için bu parametre kullanıldı
+        private int threadCount = 5;// Default thread sayısı 
+        private int completedThread = 0;// Tamamlanan thread sayısı
         private List<string> wordCounts = new List<string>();// Cümle içindeki tüm kelimeler bu listeye eklenir.
         private string fileName = "C:\\test.txt";
         private string[] sentences;
         private static readonly object lockObject = new object();//Aynı anda farklı threadlerin aynı cümleye atanmaması için o fonksiyon içinde lock objesi kullanıldı
+        private List<ThreadItem> threadItemCount = new List<ThreadItem>();
         #endregion Variables 
 
         /// <summary>
@@ -40,48 +41,60 @@ namespace WordCounter
         /// </summary>
         public void Run()
         {
-            Initialize();
-
-            string text = ClearText(File.ReadAllText(fileName));
-
-            sentences = text.Split(delimiters);
-
-            for (int i = 0; i < threadCount; i++)
+            try
             {
-                Thread thread = new Thread(() =>
+                Initialize();
+
+                string text = ClearText(File.ReadAllText(fileName));
+
+                sentences = text.Split(delimiters);
+
+                for (int i = 0; i < threadCount; i++)
                 {
-                    ThreadProcess();
-                    completedThread++;
-                });
-                thread.Start();
+                    Thread thread = new Thread(ThreadProcess);
+                    thread.Start(i);
+                }
+
+                while (threadCount != completedThread) { }
+
+                int avgScore = wordCounts.Count / (sentences.Length - 1);
+
+                int sentenceCount = sentences.Length;
+
+                #region PrintingResult
+                Console.WriteLine("Sentence Count  : " + sentenceCount);
+
+                Console.WriteLine("Avg. Word Count : " + avgScore);
+
+                Console.WriteLine("Thread Counts : " + threadCount);
+
+                foreach (var item in threadItemCount)
+                {
+                    Console.WriteLine("     ThreadId= {0}, Count={1}", item.ThreadId, item.SentenceCount);
+                }
+
+
+                wordCounts
+                    .GroupBy(info => info)
+                    .Select(group => new
+                    {
+                        Word = group.Key,
+                        Count = group.Count()
+                    })
+                    .OrderByDescending(a => a.Count)
+                    .ToList()
+                    .ForEach(a =>
+                    {
+                        Console.WriteLine(a.Word + " : " + a.Count);
+                    });
+
+                #endregion PrintingResult
             }
-
-            while (threadCount != completedThread) { }
-
-            int avgScore = wordCounts.Count / (sentences.Length - 1);
-
-            int sentenceCount = sentences.Length - 1;
-
-            #region PrintingResult
-            Console.WriteLine("Sentence Count  : " + sentenceCount);
-
-            Console.WriteLine("Avg. Word Count : " + avgScore);
-
-            wordCounts
-                .GroupBy(info => info)
-                .Select(group => new
-                {
-                    Word = group.Key,
-                    Count = group.Count()
-                })
-                .OrderByDescending(a => a.Count)
-                .ToList()
-                .ForEach(a =>
-                {
-                    Console.WriteLine(a.Word + " : " + a.Count);
-                });
-
-            #endregion PrintingResult
+            catch(Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+                Console.Read();
+            }
         }
 
         /// <summary>
@@ -91,7 +104,7 @@ namespace WordCounter
         {
             Console.WriteLine("Dosya yolu giriniz (Örnek: C:\\test.txt)");
             fileName = Console.ReadLine();
-            Console.WriteLine("Yardımcı thread sayısı giriniz? (Y/N) (Default Thread : 5)");
+            Console.WriteLine("Yardımcı thread sayısı girmek ister misiniz? (Y/N) (Default Thread Sayısı : 5)");
             if (Console.ReadLine() == "Y")
             {
                 Console.WriteLine("Yardımcı thread sayısını giriniz : ");
@@ -102,30 +115,37 @@ namespace WordCounter
         }
 
         /// <summary>
-        /// Task Process süreci çalıştırılır
+        /// Thread Process süreci çalıştırılır
         /// </summary>
-        private void ThreadProcess()
+        public void ThreadProcess(object data)
         {
-            lock (lockObject)
+            int sentenceCount = 0;
+            while (sentenceIndex < sentences.Length - 1)
             {
-                while (sentenceIndex < sentences.Length - 1)
+                lock (lockObject)
                 {
-                    WordCount(sentenceIndex);
+                    WordCount(data, sentenceIndex, ref sentenceCount);
                     sentenceIndex++;
                 }
             }
+            threadItemCount.Add(new ThreadItem() { ThreadId = data, SentenceCount = sentenceCount });
+            completedThread++;
         }
 
         /// <summary>
-        /// Cümle boşluklara göre parse edilir ve wordCount listesine eklenir
+        /// Cümle boşluklara göre parse edilir ve wordCount listesine eklenir, ve ilgili thread için cümle sayısı 1 artırılır
         /// </summary>
         /// <param name="sentenceIndex"></param>
-        public void WordCount(int sentenceIndex)
+        public void WordCount(object data, int sentenceIndex, ref int sentenceCount)
         {
-            string[] words = sentences[sentenceIndex].Trim().Split(' ');
-            foreach (var item in words)
+            if (sentenceIndex < sentences.Length)
             {
-                wordCounts.Add(item);
+                string[] words = sentences[sentenceIndex].Trim().Split(' ');
+                foreach (var item in words)
+                {
+                    wordCounts.Add(item);
+                }
+                sentenceCount++;
             }
         }
 
@@ -152,5 +172,10 @@ namespace WordCounter
             }
             return clearText;
         }
+    }
+    class ThreadItem
+    {
+        public object ThreadId { get; set; }
+        public int SentenceCount { get; set; }
     }
 }
